@@ -2,16 +2,15 @@
 pragma solidity ^0.8.20;
 
 contract SportChain {
-
     struct Participante {
         bytes32 hashIdentidad; // Huella digital de sus datos (fuera de la cadena)
-        bool registrado;       // Flag para validar si existe en la plataforma
+        bool registrado; // Flag para validar si existe en la plataforma
     }
 
     struct Evento {
         uint256 costoInscripcion; // Costo en wei para asegurar cupo
-        bool finalizado;          // Estado de la competencia
-        address[3] podio;         // Espacio acotado para los 3 ganadores (Push)
+        bool finalizado; // Estado de la competencia
+        address[3] podio; // Espacio acotado para los 3 ganadores (Push)
     }
 
     address public owner;
@@ -31,9 +30,7 @@ contract SportChain {
     // Contador global para generar los IDs de eventos secuenciales
     uint256 public totalEventos;
 
-    // ==========================================
-    // ERRORES PERSONALIZADOS (CUSTOM ERRORS - Ahorro de Gas)
-    // ==========================================
+    // Errores customizados
     error NoEsAdmin(address usuario);
     error NoEsJuezAutorizado(address usuario);
     error ParticipanteYaRegistrado();
@@ -46,9 +43,7 @@ contract SportChain {
     error YaReclamoMedalla();
     error NoParticipoEnEvento();
 
-    // ==========================================
-    // EVENTOS (Para comunicación con el Frontend/DApp)
-    // ==========================================
+    // Eventos
     event OwnerCambiado(address indexed antiguoOwner, address indexed nuevoOwner);
     event AccesoJuezModificado(address indexed juez, bool autorizado);
     event ParticipanteRegistrado(address indexed participante, bytes32 hashIdentidad);
@@ -57,10 +52,7 @@ contract SportChain {
     event CompetenciaFinalizada(uint256 indexed eventoId, address[3] podio);
     event MedallaGeneralReclamada(uint256 indexed eventoId, address indexed participante);
 
-    // ==========================================
     // MODIFICADORES (CONTROL DE ACCESO)
-    // ==========================================
-    
     // Restringe funciones críticas únicamente al Administrador principal
     modifier onlyOwner() {
         if (msg.sender != owner) {
@@ -88,8 +80,8 @@ contract SportChain {
         // Quien hace el deploy (tú) queda registrado como el único Admin Supremo
         owner = msg.sender;
         emit OwnerCambiado(address(0), msg.sender);
-        
-        // Autorizamos inmediatamente a tus otros dos compañeros como los jueces iniciales
+
+        // Autorización jueces
         esJuez[_juez1] = true;
         esJuez[_juez2] = true;
         emit AccesoJuezModificado(_juez1, true);
@@ -108,5 +100,17 @@ contract SportChain {
     function configurarJuez(address _juez, bool _autorizado) external onlyOwner {
         esJuez[_juez] = _autorizado;
         emit AccesoJuezModificado(_juez, _autorizado);
+    }
+
+    // Funciones
+
+    function registrarParticipante(bytes32 _hashIdentidad) external {
+        if (participantes[msg.sender].registrado) {
+            revert ParticipanteYaRegistrado();
+        }
+
+        participantes[msg.sender] = Participante({hashIdentidad: _hashIdentidad, registrado: true});
+
+        emit ParticipanteRegistrado(msg.sender, _hashIdentidad);
     }
 }

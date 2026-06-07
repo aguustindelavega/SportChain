@@ -102,7 +102,21 @@ contract SportChain {
         emit AccesoJuezModificado(_juez, _autorizado);
     }
 
-    // Funciones
+    function crearEvento(uint256 _costoInscripcion) external onlyOwner {
+        totalEventos++; // Incrementamos el contador de IDs
+
+        // Inicializamos el evento en el storage. 
+        // El array del podio se inicializa con direcciones vacías (address(0)).
+        eventos[totalEventos] = Evento({
+            costoInscripcion: _costoInscripcion,
+            finalizado: false,
+            podio: [address(0), address(0), address(0)]
+        });
+
+        emit EventoCreado(totalEventos, _costoInscripcion);
+    }
+
+    // Otras Funciones
 
     function registrarParticipante(bytes32 _hashIdentidad) external {
         if (participantes[msg.sender].registrado) {
@@ -112,5 +126,29 @@ contract SportChain {
         participantes[msg.sender] = Participante({hashIdentidad: _hashIdentidad, registrado: true});
 
         emit ParticipanteRegistrado(msg.sender, _hashIdentidad);
+    }
+
+    function inscripcionEvento(uint256 _eventoId) external payable {
+        if (!participantes[msg.sender].registrado) {
+            revert ParticipanteNoRegistrado();
+        }
+        if (_eventoId == 0 || _eventoId > totalEventos) {
+            revert EventoNoExiste();
+        }
+        if (eventos[_eventoId].finalizado) {
+            revert EventoYaFinalizado();
+        }
+        if (inscritosAEvento[_eventoId][msg.sender]) {
+            revert YaInscrito();
+        }
+        
+        // Validación de Fondos
+        if (msg.value != eventos[_eventoId].costoInscripcion) {
+            revert InsuficienteETH(msg.value, eventos[_eventoId].costoInscripcion);
+        }
+
+        inscritosAEvento[_eventoId][msg.sender] = true;
+
+        emit InscripcionExitosa(_eventoId, msg.sender);
     }
 }

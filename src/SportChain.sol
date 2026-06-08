@@ -27,6 +27,9 @@ contract SportChain {
     // Control individual para saber quién pagó en qué evento (Evento ID => Participante => Pagó)
     mapping(uint256 => mapping(address => bool)) public inscritosAEvento;
 
+    // Control para evitar que alguien retire su reembolso dos veces
+    mapping(uint256 => mapping(address => bool)) public reembolsoReclamado;
+
     // Contador global para generar los IDs de eventos secuenciales
     uint256 public totalEventos;
 
@@ -42,6 +45,8 @@ contract SportChain {
     error EventoNoFinalizado();
     error YaReclamoMedalla();
     error NoParticipoEnEvento();
+    error ReembolsoYaReclamado();
+    error TransferenciaFallida();
 
     // Eventos
     event OwnerCambiado(address indexed antiguoOwner, address indexed nuevoOwner);
@@ -49,8 +54,9 @@ contract SportChain {
     event ParticipanteRegistrado(address indexed participante, bytes32 hashIdentidad);
     event EventoCreado(uint256 indexed eventoId, uint256 costoInscripcion);
     event InscripcionExitosa(uint256 indexed eventoId, address indexed participante);
-    event CompetenciaFinalizada(uint256 indexed eventoId, address[3] podio);
+    event EventoFinalizado(uint256 indexed eventoId, address[3] podio);
     event MedallaGeneralReclamada(uint256 indexed eventoId, address indexed participante);
+    event ReembolsoEmitido(uint256 indexed eventoId, address indexed participante, uint256 monto);
 
     // MODIFICADORES (CONTROL DE ACCESO)
     // Restringe funciones críticas únicamente al Administrador principal
@@ -69,13 +75,6 @@ contract SportChain {
         _;
     }
 
-    // ==========================================
-    // CONSTRUCTOR (Inicialización de Gobernanza)
-    // ==========================================
-    /**
-     * @param _juez1 Dirección del primer compañero del grupo
-     * @param _juez2 Dirección del segundo compañero del grupo
-     */
     constructor(address _juez1, address _juez2) {
         // Quien hace el deploy (tú) queda registrado como el único Admin Supremo
         owner = msg.sender;
@@ -88,9 +87,7 @@ contract SportChain {
         emit AccesoJuezModificado(_juez2, true);
     }
 
-    // ==========================================
-    // FUNCIONES ADMINISTRATIVAS (ONLY OWNER)
-    // ==========================================
+    // Funciones solo del owner
 
     /**
      * @notice Permite al Admin agregar nuevos jueces o revocar accesos en el futuro.
@@ -105,18 +102,16 @@ contract SportChain {
     function crearEvento(uint256 _costoInscripcion) external onlyOwner {
         totalEventos++; // Incrementamos el contador de IDs
 
-        // Inicializamos el evento en el storage. 
+        // Inicializamos el evento en el storage.
         // El array del podio se inicializa con direcciones vacías (address(0)).
         eventos[totalEventos] = Evento({
-            costoInscripcion: _costoInscripcion,
-            finalizado: false,
-            podio: [address(0), address(0), address(0)]
+            costoInscripcion: _costoInscripcion, finalizado: false, podio: [address(0), address(0), address(0)]
         });
 
         emit EventoCreado(totalEventos, _costoInscripcion);
     }
 
-    // Otras Funciones
+    // Otras Funciones públicas
 
     function registrarParticipante(bytes32 _hashIdentidad) external {
         if (participantes[msg.sender].registrado) {
@@ -141,7 +136,7 @@ contract SportChain {
         if (inscritosAEvento[_eventoId][msg.sender]) {
             revert YaInscrito();
         }
-        
+
         // Validación de Fondos
         if (msg.value != eventos[_eventoId].costoInscripcion) {
             revert InsuficienteETH(msg.value, eventos[_eventoId].costoInscripcion);
@@ -150,5 +145,55 @@ contract SportChain {
         inscritosAEvento[_eventoId][msg.sender] = true;
 
         emit InscripcionExitosa(_eventoId, msg.sender);
+    }
+
+    function finalizarEvento(uint256 _eventoId, address[3] calldata _podio) external onlyJudge {
+        if (_eventoId == 0 || _eventoId > totalEventos) revert EventoNoExiste();
+        if (eventos[_eventoId].finalizado) revert EventoYaFinalizado();
+
+        // Cambiamos el estado
+        eventos[_eventoId].finalizado = true;
+        eventos[_eventoId].podio = _podio;
+
+        emit EventoFinalizado(_eventoId, _podio);
+    }
+
+    function reclamarReembolso(uint256 _eventoId) external {
+        if (_eventoId == 0 || _eventoId > totalEventos) revert EventoNoExiste();
+        if (!eventos[_eventoId].finalizado) revert EventoNoFinalizado();
+        if (!inscritosAEvento[_eventoId][msg.sender]) revert NoParticipoEnEvento();
+        if (reembolsoReclamado[_eventoId][msg.sender]) revert ReembolsoYaReclamado();
+
+        // 2. EFFECTS (Cambios de estado interno)
+        // ¡Crucial! Marcamos como cobrado ANTES de enviar el dinero
+        reembolsoReclamado[_eventoId][msg.sender] = true;
+        uint256 montoAReembolsar = eventos[_eventoId].costoInscripcion;
+
+        // 3. INTERACTIONS (Envío de ETH a un contrato/cuenta externa)
+        // Usamos .call que es el método moderno y seguro recomendado en Ethereum
+        (bool exito,) = msg.sender.call{value: montoAReembolsar}("");
+        if (!exito) revert TransferenciaFallida();
+
+        emit ReembolsoEmitido(_eventoId, msg.sender, montoAReembolsar);
+    }
+
+    function obtenerRanking(uint256 _eventoId) external view returns (address[3] memory) {
+        // Validación básica
+        if (_eventoId == 0 || _eventoId > totalEventos) revert EventoNoExiste();
+
+        // Retornamos el arreglo completo que está en el storage
+        // La palabra "memory" es obligatoria al devolver arreglos o textos
+        return eventos[_eventoId].podio;
+    }
+
+    function obtenerPerfilParticipante(address _participante)
+        external
+        view
+        returns (bytes32 hashIdentidad, bool registrado)
+    {
+        // Guardamos temporalmente en memoria para optimizar la lectura
+        Participante memory p = participantes[_participante];
+
+        return (p.hashIdentidad, p.registrado);
     }
 }

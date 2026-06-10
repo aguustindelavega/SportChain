@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 contract SportChain {
+    enum TipoMedalla {ORO, PLATA, BRONCE, PARTICIPACION}
     struct Participante {
         bytes32 hashIdentidad; // Huella digital de sus datos (fuera de la cadena)
         bool registrado; // Flag para validar si existe en la plataforma
@@ -30,6 +31,9 @@ contract SportChain {
     // Control para evitar que alguien retire su reembolso dos veces
     mapping(uint256 => mapping(address => bool)) public reembolsoReclamado;
 
+    // Control para saber quién ya reclamó su medalla (Evento ID => Participante => Reclamó)
+    mapping(uint256 => mapping(address => bool)) public medallaReclamada;
+
     // Contador global para generar los IDs de eventos secuenciales
     uint256 public totalEventos;
 
@@ -55,7 +59,7 @@ contract SportChain {
     event EventoCreado(uint256 indexed eventoId, uint256 costoInscripcion);
     event InscripcionExitosa(uint256 indexed eventoId, address indexed participante);
     event EventoFinalizado(uint256 indexed eventoId, address[3] podio);
-    event MedallaGeneralReclamada(uint256 indexed eventoId, address indexed participante);
+    event MedallaGeneralReclamada(uint256 indexed eventoId, address indexed participante, TipoMedalla tipoMedalla);
     event ReembolsoEmitido(uint256 indexed eventoId, address indexed participante, uint256 monto);
 
     // MODIFICADORES (CONTROL DE ACCESO)
@@ -176,7 +180,33 @@ contract SportChain {
 
         emit ReembolsoEmitido(_eventoId, msg.sender, montoAReembolsar);
     }
+    function reclamarMedalla(uint256 _eventoId) external {
+        // 1. CHECKS (Validaciones)
+        if (_eventoId == 0 || _eventoId > totalEventos) revert EventoNoExiste(); [cite: 13, 32, 40]
+        if (!eventos[_eventoId].finalizado) revert EventoNoFinalizado(); [cite: 14, 40]
+        if (!inscritosAEvento[_eventoId][msg.sender]) revert NoParticipoEnEvento(); [cite: 14, 40]
+        if (medallaReclamada[_eventoId][msg.sender]) revert YaReclamoMedalla(); 
 
+        // 2. EFFECTS (Cambios de estado interno)
+        medallaReclamada[_eventoId][msg.sender] = true;
+
+        // Lógica para determinar el tipo de medalla
+        TipoMedalla tipo;
+        address[3] memory podio = eventos[_eventoId].podio; [cite: 9, 45]
+
+        if (msg.sender == podio[0]) {
+            tipo = TipoMedalla.ORO;
+        } else if (msg.sender == podio[1]) {
+            tipo = TipoMedalla.PLATA;
+        } else if (msg.sender == podio[2]) {
+            tipo = TipoMedalla.BRONCE;
+        } else {
+            tipo = TipoMedalla.PARTICIPACION;
+    }
+
+    // 3. INTERACTIONS (Eventos / Llamadas externas)
+    emit MedallaGeneralReclamada(_eventoId, msg.sender, tipo);
+    }
     function obtenerRanking(uint256 _eventoId) external view returns (address[3] memory) {
         // Validación básica
         if (_eventoId == 0 || _eventoId > totalEventos) revert EventoNoExiste();

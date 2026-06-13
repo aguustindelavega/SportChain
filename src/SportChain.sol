@@ -2,7 +2,13 @@
 pragma solidity ^0.8.20;
 
 contract SportChain {
-    enum TipoMedalla {ORO, PLATA, BRONCE, PARTICIPACION}
+    enum TipoMedalla {
+        ORO,
+        PLATA,
+        BRONCE,
+        PARTICIPACION
+    }
+
     struct Participante {
         bytes32 hashIdentidad; // Huella digital de sus datos (fuera de la cadena)
         bool registrado; // Flag para validar si existe en la plataforma
@@ -180,12 +186,13 @@ contract SportChain {
 
         emit ReembolsoEmitido(_eventoId, msg.sender, montoAReembolsar);
     }
+
     function reclamarMedalla(uint256 _eventoId) external {
         // 1. CHECKS (Validaciones)
         if (_eventoId == 0 || _eventoId > totalEventos) revert EventoNoExiste(); // [cite: 13, 32, 40]
         if (!eventos[_eventoId].finalizado) revert EventoNoFinalizado(); // [cite: 14, 40]
         if (!inscritosAEvento[_eventoId][msg.sender]) revert NoParticipoEnEvento(); // [cite: 14, 40]
-        if (medallaReclamada[_eventoId][msg.sender]) revert YaReclamoMedalla(); 
+        if (medallaReclamada[_eventoId][msg.sender]) revert YaReclamoMedalla();
 
         // 2. EFFECTS (Cambios de estado interno)
         medallaReclamada[_eventoId][msg.sender] = true;
@@ -202,11 +209,12 @@ contract SportChain {
             tipo = TipoMedalla.BRONCE;
         } else {
             tipo = TipoMedalla.PARTICIPACION;
+        }
+
+        // 3. INTERACTIONS (Eventos / Llamadas externas)
+        emit MedallaGeneralReclamada(_eventoId, msg.sender, tipo);
     }
 
-    // 3. INTERACTIONS (Eventos / Llamadas externas)
-    emit MedallaGeneralReclamada(_eventoId, msg.sender, tipo);
-    }
     function obtenerRanking(uint256 _eventoId) external view returns (address[3] memory) {
         // Validación básica
         if (_eventoId == 0 || _eventoId > totalEventos) revert EventoNoExiste();

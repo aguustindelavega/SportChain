@@ -182,9 +182,9 @@ contract SportChain {
     }
     function reclamarMedalla(uint256 _eventoId) external {
         // 1. CHECKS (Validaciones)
-        if (_eventoId == 0 || _eventoId > totalEventos) revert EventoNoExiste(); [cite: 13, 32, 40]
-        if (!eventos[_eventoId].finalizado) revert EventoNoFinalizado(); [cite: 14, 40]
-        if (!inscritosAEvento[_eventoId][msg.sender]) revert NoParticipoEnEvento(); [cite: 14, 40]
+        if (_eventoId == 0 || _eventoId > totalEventos) revert EventoNoExiste(); // [cite: 13, 32, 40]
+        if (!eventos[_eventoId].finalizado) revert EventoNoFinalizado(); // [cite: 14, 40]
+        if (!inscritosAEvento[_eventoId][msg.sender]) revert NoParticipoEnEvento(); // [cite: 14, 40]
         if (medallaReclamada[_eventoId][msg.sender]) revert YaReclamoMedalla(); 
 
         // 2. EFFECTS (Cambios de estado interno)
@@ -192,7 +192,7 @@ contract SportChain {
 
         // Lógica para determinar el tipo de medalla
         TipoMedalla tipo;
-        address[3] memory podio = eventos[_eventoId].podio; [cite: 9, 45]
+        address[3] memory podio = eventos[_eventoId].podio; // [cite: 9, 45]
 
         if (msg.sender == podio[0]) {
             tipo = TipoMedalla.ORO;

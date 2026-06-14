@@ -34,6 +34,9 @@ contract SportChain {
     // Control individual para saber quién pagó en qué evento (Evento ID => Participante => Pagó)
     mapping(uint256 => mapping(address => bool)) public inscritosAEvento;
 
+    // Control de asistencia: Validado por el juez en terreno (Anti-Spam)
+    mapping(uint256 => mapping(address => bool)) public asistio;
+
     // Control para evitar que alguien retire su reembolso dos veces
     mapping(uint256 => mapping(address => bool)) public reembolsoReclamado;
 
@@ -55,6 +58,7 @@ contract SportChain {
     error EventoNoFinalizado();
     error YaReclamoMedalla();
     error NoParticipoEnEvento();
+    error NoAsistioAlEvento();
     error ReembolsoYaReclamado();
     error TransferenciaFallida();
 
@@ -64,6 +68,7 @@ contract SportChain {
     event ParticipanteRegistrado(address indexed participante, bytes32 hashIdentidad);
     event EventoCreado(uint256 indexed eventoId, uint256 costoInscripcion);
     event InscripcionExitosa(uint256 indexed eventoId, address indexed participante);
+    event AsistenciaRegistrada(uint256 indexed eventoId, address indexed participante);
     event EventoFinalizado(uint256 indexed eventoId, address[3] podio);
     event MedallaGeneralReclamada(uint256 indexed eventoId, address indexed participante, TipoMedalla tipoMedalla);
     event ReembolsoEmitido(uint256 indexed eventoId, address indexed participante, uint256 monto);
@@ -97,7 +102,7 @@ contract SportChain {
         emit AccesoJuezModificado(_juez2, true);
     }
 
-    // Funciones solo del owner
+    // Funciones Solo del Owner
 
     /**
      * @notice Permite al Admin agregar nuevos jueces o revocar accesos en el futuro.
@@ -111,25 +116,39 @@ contract SportChain {
 
     function crearEvento(uint256 _costoInscripcion) external onlyOwner {
         totalEventos++; // Incrementamos el contador de IDs
-
-        // Inicializamos el evento en el storage.
-        // El array del podio se inicializa con direcciones vacías (address(0)).
         eventos[totalEventos] = Evento({
             costoInscripcion: _costoInscripcion, finalizado: false, podio: [address(0), address(0), address(0)]
         });
 
         emit EventoCreado(totalEventos, _costoInscripcion);
     }
+    // Funciones de los Jueces
 
-    // Otras Funciones públicas
+    function marcarAsistencia(uint256 _eventoId, address[] calldata _asistentes) external onlyJudge {
+        if (_eventoId == 0 || _eventoId > totalEventos) revert EventoNoExiste();
+        if (eventos[_eventoId].finalizado) revert EventoYaFinalizado();
+
+        for (uint256 i = 0; i < _asistentes.length; i++) {
+            asistio[_eventoId][_asistentes[i]] = true;
+            emit AsistenciaRegistrada(_eventoId, _asistentes[i]);
+        }
+    }
+
+    function finalizarEvento(uint256 _eventoId, address[3] calldata _podio) external onlyJudge {
+        if (_eventoId == 0 || _eventoId > totalEventos) revert EventoNoExiste();
+        if (eventos[_eventoId].finalizado) revert EventoYaFinalizado();
+        eventos[_eventoId].finalizado = true;
+        eventos[_eventoId].podio = _podio;
+        emit EventoFinalizado(_eventoId, _podio);
+    }
+
+    // Funciones Públicas / Operativas
 
     function registrarParticipante(bytes32 _hashIdentidad) external {
         if (participantes[msg.sender].registrado) {
             revert ParticipanteYaRegistrado();
         }
-
         participantes[msg.sender] = Participante({hashIdentidad: _hashIdentidad, registrado: true});
-
         emit ParticipanteRegistrado(msg.sender, _hashIdentidad);
     }
 
@@ -146,41 +165,28 @@ contract SportChain {
         if (inscritosAEvento[_eventoId][msg.sender]) {
             revert YaInscrito();
         }
-
         // Validación de Fondos
         if (msg.value != eventos[_eventoId].costoInscripcion) {
             revert InsuficienteETH(msg.value, eventos[_eventoId].costoInscripcion);
         }
 
         inscritosAEvento[_eventoId][msg.sender] = true;
-
         emit InscripcionExitosa(_eventoId, msg.sender);
-    }
-
-    function finalizarEvento(uint256 _eventoId, address[3] calldata _podio) external onlyJudge {
-        if (_eventoId == 0 || _eventoId > totalEventos) revert EventoNoExiste();
-        if (eventos[_eventoId].finalizado) revert EventoYaFinalizado();
-
-        // Cambiamos el estado
-        eventos[_eventoId].finalizado = true;
-        eventos[_eventoId].podio = _podio;
-
-        emit EventoFinalizado(_eventoId, _podio);
     }
 
     function reclamarReembolso(uint256 _eventoId) external {
         if (_eventoId == 0 || _eventoId > totalEventos) revert EventoNoExiste();
         if (!eventos[_eventoId].finalizado) revert EventoNoFinalizado();
         if (!inscritosAEvento[_eventoId][msg.sender]) revert NoParticipoEnEvento();
+        if (!asistio[_eventoId][msg.sender]) revert NoAsistioAlEvento();
         if (reembolsoReclamado[_eventoId][msg.sender]) revert ReembolsoYaReclamado();
 
-        // 2. EFFECTS (Cambios de estado interno)
-        // ¡Crucial! Marcamos como cobrado ANTES de enviar el dinero
+        // Cambios de estado interno
+        // Marcamos como cobrado antes de enviar el dinero
         reembolsoReclamado[_eventoId][msg.sender] = true;
         uint256 montoAReembolsar = eventos[_eventoId].costoInscripcion;
 
-        // 3. INTERACTIONS (Envío de ETH a un contrato/cuenta externa)
-        // Usamos .call que es el método moderno y seguro recomendado en Ethereum
+        // INTERACTIONS (Envío de ETH a un contrato/cuenta externa)
         (bool exito,) = msg.sender.call{value: montoAReembolsar}("");
         if (!exito) revert TransferenciaFallida();
 
@@ -188,18 +194,19 @@ contract SportChain {
     }
 
     function reclamarMedalla(uint256 _eventoId) external {
-        // 1. CHECKS (Validaciones)
-        if (_eventoId == 0 || _eventoId > totalEventos) revert EventoNoExiste(); // [cite: 13, 32, 40]
-        if (!eventos[_eventoId].finalizado) revert EventoNoFinalizado(); // [cite: 14, 40]
-        if (!inscritosAEvento[_eventoId][msg.sender]) revert NoParticipoEnEvento(); // [cite: 14, 40]
+        // Validaciones
+        if (_eventoId == 0 || _eventoId > totalEventos) revert EventoNoExiste();
+        if (!eventos[_eventoId].finalizado) revert EventoNoFinalizado();
+        if (!inscritosAEvento[_eventoId][msg.sender]) revert NoParticipoEnEvento();
+        if (!asistio[_eventoId][msg.sender]) revert NoAsistioAlEvento();
         if (medallaReclamada[_eventoId][msg.sender]) revert YaReclamoMedalla();
 
-        // 2. EFFECTS (Cambios de estado interno)
+        // Cambios de estado interno
         medallaReclamada[_eventoId][msg.sender] = true;
 
         // Lógica para determinar el tipo de medalla
         TipoMedalla tipo;
-        address[3] memory podio = eventos[_eventoId].podio; // [cite: 9, 45]
+        address[3] memory podio = eventos[_eventoId].podio;
 
         if (msg.sender == podio[0]) {
             tipo = TipoMedalla.ORO;
@@ -211,16 +218,12 @@ contract SportChain {
             tipo = TipoMedalla.PARTICIPACION;
         }
 
-        // 3. INTERACTIONS (Eventos / Llamadas externas)
+        // INTERACTIONS (Eventos / Llamadas externas)
         emit MedallaGeneralReclamada(_eventoId, msg.sender, tipo);
     }
 
     function obtenerRanking(uint256 _eventoId) external view returns (address[3] memory) {
-        // Validación básica
         if (_eventoId == 0 || _eventoId > totalEventos) revert EventoNoExiste();
-
-        // Retornamos el arreglo completo que está en el storage
-        // La palabra "memory" es obligatoria al devolver arreglos o textos
         return eventos[_eventoId].podio;
     }
 
